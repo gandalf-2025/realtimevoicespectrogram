@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Responsive Real-time Human Voice Spectrogram</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: #111;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: sans-serif;
+    }
+
+    h1 {
+      margin: 16px 0;
+      text-align: center;
+    }
+
+    #spectrogram-container {
+      position: relative;
+      width: 90vw;           /* 90% of viewport width */
+      max-width: 1200px;     /* cap at 1200px */
+      aspect-ratio: 2 / 1;   /* keep 2:1 ratio */
+      border: 1px solid #FFF;
+      overflow: visible;     /* let the axis stick out */
+    }
+
+    /* SPECTROGRAM fills the container */
+    #spectrogramCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* AXIS sits to the left, outside the border */
+    #frequency-axis {
+      position: absolute;
+      top: 0;
+      left: -60px;          /* push it fully outside */
+      width: 60px;          /* same as axisWidth in JS */
+      height: 100%;
+      pointer-events: none; /* clicks go through */
+    }
+
+    button {
+      margin: 12px;
+      padding: 10px 24px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Real-time Human Voice Spectrogram</h1>
+  <div id="spectrogram-container">
+    <canvas id="frequency-axis"></canvas>
+    <canvas id="spectrogramCanvas"></canvas>
+  </div>
+
+  <div>
+    <button id="startBtn">Start Microphone</button>
+    <button id="stopButton">Stop</button>
+    <button id="clearButton">Clear</button>
+  </div>
+
+  <script>
+    const startBtn    = document.getElementById('startBtn');
+    const stopBtn     = document.getElementById('stopButton');
+    const clearBtn    = document.getElementById('clearButton');
+    const container   = document.getElementById('spectrogram-container');
+    const canvas      = document.getElementById('spectrogramCanvas');
+    const axisCanvas  = document.getElementById('frequency-axis');
+    const ctx         = canvas.getContext('2d');
+    const axisCtx     = axisCanvas.getContext('2d');
+
+    const axisWidth   = 60;
+    let WIDTH, HEIGHT;
+    let audioContext, analyser, dataArray, bufferLength;
+    let animationFrameId, stream, sourceNode, maxFreq;
+
+    function resizeCanvases() {
+      const { width: W, height: H } = container.getBoundingClientRect();
+
+      // size axis canvas
+      axisCanvas.width  = axisWidth;
+      axisCanvas.height = H;
+
+      // size spectrogram canvas
+      canvas.width  = Math.floor(W);
+      canvas.height = Math.floor(H);
+
+      WIDTH  = canvas.width;
+      HEIGHT = canvas.height;
+    }
+
+    window.addEventListener('resize', resizeCanvases);
+    resizeCanvases();
+
+    function colorMap(val) {
+      const hue = val / 255 * 360;
+      return hue === 0
+        ? 'hsl(0,0%,0%)'
+        : `hsl(${hue},100%,50%)`;
+    }
+
+    async function startSpectrogram() {
+      if (audioContext) return;
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      analyser     = audioContext.createAnalyser();
+      analyser.fftSize = 2048;
+      bufferLength    = analyser.frequencyBinCount;
+      dataArray       = new Uint8Array(bufferLength);
+      maxFreq         = audioContext.sampleRate / 2;
+
+      try {
+        stream     = await navigator.mediaDevices.getUserMedia({ audio: true });
+        sourceNode = audioContext.createMediaStreamSource(stream);
+        sourceNode.connect(analyser);
+        analyser.connect(audioContext.destination);
+
+        drawSpectrogram();
+        drawAxis();
+      } catch (err) {
+        console.error('Mic error:', err);
+        alert('Could not access microphone. Check permissions.');
+      }
+    }
+
+    function drawSpectrogram() {
+      animationFrameId = requestAnimationFrame(drawSpectrogram);
+      analyser.getByteFrequencyData(dataArray);
+
+      // scroll left
+      const img = ctx.getImageData(1, 0, WIDTH - 1, HEIGHT);
+      ctx.putImageData(img, 0, 0);
+
+      // draw new column on the right
+      for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i];
+        const y = HEIGHT - (i / bufferLength) * HEIGHT;
+        ctx.fillStyle = colorMap(v);
+        ctx.fillRect(WIDTH - 1, y, 1, 1);
+      }
+    }
+
+    function drawAxis() {
+      axisCtx.clearRect(0, 0, axisWidth, HEIGHT);
+      axisCtx.font      = '12px sans-serif';
+      axisCtx.fillStyle = '#FFF';
+      axisCtx.textAlign = 'right';
+
+      [0, 500, 1000, 2000, 4000, 8000, 16000].forEach(freq => {
+        const norm = freq / maxFreq;
+        const y    = HEIGHT - norm * HEIGHT;
+        if (y >= 0 && y <= HEIGHT) {
+          axisCtx.fillText(`${freq} Hz`, axisWidth - 5, y);
+        }
+      });
+
+      requestAnimationFrame(drawAxis);
+    }
+
+    startBtn.addEventListener('click', startSpectrogram);
+
+    stopBtn.addEventListener('click', () => {
+      if (stream && sourceNode && audioContext) {
+        sourceNode.disconnect();
+        stream.getTracks().forEach(t => t.stop());
+        audioContext.close();
+        audioContext = sourceNode = stream = null;
+        cancelAnimationFrame(animationFrameId);
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      ctx.clearRect(0, 0, WIDTH, HEIGHT);
+    });
+  </script>
+</body>
+</html>
+
