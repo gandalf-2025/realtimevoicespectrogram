@@ -82,7 +82,7 @@
     const axisWidth   = 60;
     let WIDTH, HEIGHT;
     let audioContext, analyser, dataArray, bufferLength;
-    let animationFrameId, stream, sourceNode, maxFreq;
+    let animationFrameId, stream, audioSource, maxFreq;
     const MAGMA_STOPS = [
       {t: 0.0, r:0, g:0, b:4},
       {t: 0.25, r:60, g:13, b:91},
@@ -145,8 +145,8 @@ function lerp(a, b, t) {return a+(b-a)*t;};
 
       try {
         stream     = await navigator.mediaDevices.getUserMedia({ audio: true });
-        sourceNode = audioContext.createMediaStreamSource(stream);
-        sourceNode.connect(analyser);
+        audioSource = audioContext.createMediaStreamSource(stream);
+        audioSource.connect(analyser);
         analyser.connect(audioContext.destination);
 
         drawSpectrogram();
@@ -194,8 +194,8 @@ function lerp(a, b, t) {return a+(b-a)*t;};
     startBtn.addEventListener('click', startSpectrogram);
 
     stopBtn.addEventListener('click', () => {
-      if (stream && sourceNode && audioContext) {
-        sourceNode.disconnect();
+      if (stream && audioSource && audioContext) {
+        audioSource.disconnect();
         stream.getTracks().forEach(t => t.stop());
         audioContext.close();
         audioContext = sourceNode = stream = null;
