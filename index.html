@@ -198,7 +198,7 @@ function lerp(a, b, t) {return a+(b-a)*t;};
         audioSource.disconnect();
         stream.getTracks().forEach(t => t.stop());
         audioContext.close();
-        audioContext = sourceNode = stream = null;
+        audioContext = audioSource = stream = null;
         cancelAnimationFrame(animationFrameId);
       }
     });
