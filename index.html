@@ -78,11 +78,12 @@
     const axisCanvas  = document.getElementById('frequency-axis');
     const ctx         = canvas.getContext('2d');
     const axisCtx     = axisCanvas.getContext('2d');
-
+    const frequencyCutoff = 8000;
     const axisWidth   = 60;
     let WIDTH, HEIGHT;
     let audioContext, analyser, dataArray, bufferLength;
     let animationFrameId, stream, audioSource, maxFreq;
+    let cutoffIndex;
     const MAGMA_STOPS = [
       {t: 0.0, r:0, g:0, b:4},
       {t: 0.25, r:60, g:13, b:91},
@@ -90,6 +91,9 @@
       {t:0.75, r:211, g:109, b:95},
       {t:1.0, r:252, g:181, b:62}
     ];
+
+    const bandEdges = [0, 64, 128, 256, 512, 1024, 2048, 4096, 8000]; // 8 bands
+
 
     function resizeCanvases() {
       const { width: W, height: H } = container.getBoundingClientRect();
@@ -109,12 +113,10 @@
     window.addEventListener('resize', resizeCanvases);
     resizeCanvases();
 
-   // Color mapping for the spectrogram
-const colorMap = (value) => {
-    const {r, g, b} = grayToMagma(value);
-    return `rgb(${r}, ${g}, ${b})`; // CSS-compatible string
-};
-
+    function colorMap(value) {
+      const {r, g, b} = grayToMagma(value);
+      return `rgb(${r}, ${g}, ${b})`; // CSS-compatible string
+    }
 //render a magma colormap
 function grayToMagma(gray){
   let t = Math.max(0, Math.min(1,gray/255));//normalize
@@ -133,7 +135,6 @@ function grayToMagma(gray){
   
 };
 function lerp(a, b, t) {return a+(b-a)*t;};
-
     async function startSpectrogram() {
       if (audioContext) return;
       audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -142,6 +143,7 @@ function lerp(a, b, t) {return a+(b-a)*t;};
       bufferLength    = analyser.frequencyBinCount;
       dataArray       = new Uint8Array(bufferLength);
       maxFreq         = audioContext.sampleRate / 2;
+      cutoffIndex = Math.floor((frequencyCutoff / maxFreq) * bufferLength);
 
       try {
         stream     = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -165,14 +167,38 @@ function lerp(a, b, t) {return a+(b-a)*t;};
       const img = ctx.getImageData(1, 0, WIDTH - 1, HEIGHT);
       ctx.putImageData(img, 0, 0);
 
+      const bandWidth = maxFreq / bufferLength;
       // draw new column on the right
       for (let i = 0; i < bufferLength; i++) {
         const v = dataArray[i];
-        const y = HEIGHT - (i / bufferLength) * HEIGHT;
+        const freq=(i/bufferLength)*maxFreq;
+        if(freq>frequencyCutoff) continue;
+        const yTop = freqToY(freq, canvas.height);
+	const yBottom = freqToY(freq + bandWidth, canvas.height);
+	let yStart = Math.min(yTop, yBottom);
+	let yEnd = Math.max(yTop, yBottom);
+
+	// Ensure minimum height of 1 pixel to avoid collapse
+	if (yEnd - yStart < 1) yEnd = yStart + 1;
+        
         ctx.fillStyle = colorMap(v);
-        ctx.fillRect(WIDTH - 1, y, 1, 1);
+        ctx.fillRect(WIDTH - 1, yStart, 1, yEnd-yStart);
       }
     }
+
+function freqToY(freq, canvasHeight) {
+  const bandCount = bandEdges.length - 1;
+  const bandHeight = canvasHeight / bandCount;
+
+  let bandIndex = bandEdges.findIndex((edge, i) => freq >= edge && freq < bandEdges[i + 1]);
+  if (bandIndex === -1) bandIndex = bandCount - 1;
+
+  const f0 = bandEdges[bandIndex];
+  const f1 = bandEdges[bandIndex + 1];
+  const frac = (freq - f0) / (f1 - f0);
+
+  return canvasHeight - (bandIndex + frac) * bandHeight;
+};
 
     function drawAxis() {
       axisCtx.clearRect(0, 0, axisWidth, HEIGHT);
@@ -180,13 +206,11 @@ function lerp(a, b, t) {return a+(b-a)*t;};
       axisCtx.fillStyle = '#FFF';
       axisCtx.textAlign = 'right';
 
-      [0, 500, 1000, 2000, 4000, 8000, 16000].forEach(freq => {
-        const norm = freq / maxFreq;
-        const y    = HEIGHT - norm * HEIGHT;
-        if (y >= 0 && y <= HEIGHT) {
-          axisCtx.fillText(`${freq} Hz`, axisWidth - 5, y);
-        }
-      });
+      bandEdges.forEach(freq => {
+    	const y = freqToY(freq, axisCanvas.height);
+    	axisCtx.fillText(`${freq} Hz`, axisWidth-5, y);
+
+  });
 
       requestAnimationFrame(drawAxis);
     }
